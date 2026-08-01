@@ -5,6 +5,7 @@
     var MANIFEST_URL = MARKDOWN_DIR + "/manifest.json";
     var MAX_RESULTS = 40;
     var CACHE_LIMIT = 60;
+    var LAST_CARD_KEY = "ssc-gs-last-card";
 
     var contentEl = document.getElementById("content");
     var counterEl = document.getElementById("counter");
@@ -278,6 +279,7 @@
         if (window.location.hash !== "#" + card.slug) {
             history.replaceState(null, "", "#" + card.slug);
         }
+        rememberCard(card.slug);
         document.title = card.title + " · SSC GS";
 
         loadCard(current)
@@ -322,13 +324,43 @@
         render();
     }
 
-    function indexFromHash() {
-        var slug = decodeURIComponent(window.location.hash.replace("#", ""));
-        if (!slug) return 0;
+    function indexOfSlug(slug) {
+        if (!slug) return -1;
         for (var i = 0; i < cards.length; i++) {
             if (cards[i].slug === slug) return i;
         }
-        return 0;
+        return -1;
+    }
+
+    function indexFromHash() {
+        var found = indexOfSlug(decodeURIComponent(window.location.hash.replace("#", "")));
+        return found === -1 ? 0 : found;
+    }
+
+    // A shared link's hash wins; otherwise pick up where the last visit ended.
+    // A saved slug can go stale if that card was renamed or removed.
+    function startingIndex() {
+        var fromHash = indexOfSlug(decodeURIComponent(window.location.hash.replace("#", "")));
+        if (fromHash !== -1) return fromHash;
+
+        var saved = indexOfSlug(readLastSlug());
+        return saved === -1 ? 0 : saved;
+    }
+
+    function readLastSlug() {
+        try {
+            return localStorage.getItem(LAST_CARD_KEY);
+        } catch (err) {
+            return null;
+        }
+    }
+
+    function rememberCard(slug) {
+        try {
+            localStorage.setItem(LAST_CARD_KEY, slug);
+        } catch (err) {
+            /* private browsing or full storage — position simply is not kept */
+        }
     }
 
     /* ---------- Search ---------- */
@@ -507,7 +539,7 @@
                 showError("No cards listed in <code>" + MANIFEST_URL + "</code>.");
                 return;
             }
-            current = indexFromHash();
+            current = startingIndex();
             render();
         })
         .catch(function () {
