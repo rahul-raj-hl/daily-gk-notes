@@ -51,7 +51,7 @@
         var cached = cacheGet(card.slug);
         if (cached !== null) return Promise.resolve(cached);
 
-        return fetch(MARKDOWN_DIR + "/" + card.slug + ".md")
+        return fetch(MARKDOWN_DIR + "/" + card.slug + ".md", { cache: "no-cache" })
             .then(function (res) {
                 if (!res.ok) throw new Error("HTTP " + res.status);
                 return res.text();
@@ -263,7 +263,9 @@
 
     applyTheme(localStorage.getItem("ssc-gs-theme") || "light");
 
-    fetch(MANIFEST_URL)
+    // Pages serves these with a 10-minute max-age, so revalidate on every load
+    // or newly published cards stay invisible until the cached copy expires.
+    fetch(MANIFEST_URL, { cache: "no-cache" })
         .then(function (res) {
             if (!res.ok) throw new Error("HTTP " + res.status);
             return res.json();
