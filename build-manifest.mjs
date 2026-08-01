@@ -10,10 +10,43 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const MARKDOWN_DIR = join(ROOT, "markdowns");
 const OUTPUT = join(MARKDOWN_DIR, "manifest.json");
 
-function extractTitle(source, fallback) {
+// Handles the flat `key: value` and `- item` list shapes used in card
+// frontmatter. Not a general YAML parser.
+function parseFrontMatter(source) {
+    const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    if (!match) return {};
+
+    const meta = {};
+    let listKey = null;
+
+    for (const raw of match[1].split(/\r?\n/)) {
+        const item = raw.match(/^\s*-\s+(.*)$/);
+        if (item && listKey) {
+            meta[listKey].push(item[1].trim());
+            continue;
+        }
+
+        const pair = raw.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+        if (!pair) continue;
+
+        const key = pair[1];
+        const value = pair[2].trim();
+        if (value === "") {
+            listKey = key;
+            meta[key] = [];
+        } else {
+            listKey = null;
+            meta[key] = value.replace(/^["']|["']$/g, "");
+        }
+    }
+
+    return meta;
+}
+
+function extractTitle(source, meta, fallback) {
+    if (typeof meta.title === "string" && meta.title) return meta.title;
     const match = source.match(/^#\s+(.+)$/m);
-    if (!match) return fallback;
-    return match[1].replace(/\s+/g, " ").trim();
+    return match ? match[1].replace(/\s+/g, " ").trim() : fallback;
 }
 
 // Numeric names sort as numbers (2 before 10); anything else falls back to
@@ -36,12 +69,24 @@ const cards = await Promise.all(
     files.map(async (name) => {
         const slug = name.replace(/\.md$/i, "");
         const source = await readFile(join(MARKDOWN_DIR, name), "utf8");
-        return { slug, title: extractTitle(source, slug) };
+        const meta = parseFrontMatter(source);
+
+        // Only fields needed for search and future subject filters go in the
+        // manifest; the rest is read from the card itself when it is opened.
+        const card = { slug, title: extractTitle(source, meta, slug) };
+        if (meta.subject) card.subject = meta.subject;
+        if (meta.topic) card.topic = meta.topic;
+        return card;
     })
 );
 
 cards.sort(compareSlugs);
 
-await writeFile(OUTPUT, JSON.stringify({ cards }) + "\n", "utf8");
+const subjects = [...new Set(cards.map((c) => c.subject).filter(Boolean))].sort();
 
-console.log(`manifest.json written — ${cards.length} card(s)`);
+await writeFile(OUTPUT, JSON.stringify({ subjects, cards }) + "\n", "utf8");
+
+console.log(
+    `manifest.json written — ${cards.length} card(s)` +
+        (subjects.length ? `, ${subjects.length} subject(s): ${subjects.join(", ")}` : "")
+);
