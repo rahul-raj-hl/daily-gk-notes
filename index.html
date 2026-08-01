@@ -14,10 +14,9 @@
         </div>
 
         <div class="topbar-actions">
-            <label class="jump">
-                <span class="jump-label">Card</span>
-                <select id="jump-select" aria-label="Jump to a card"></select>
-            </label>
+            <button id="search-btn" class="search-trigger" type="button">
+                <span aria-hidden="true">🔍</span> Search <kbd>/</kbd>
+            </button>
             <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle dark mode">🌙</button>
         </div>
     </header>
@@ -41,6 +40,15 @@
             Next <span aria-hidden="true">→</span>
         </button>
     </nav>
+
+    <div id="search-overlay" class="overlay" hidden>
+        <div class="search-panel" role="dialog" aria-modal="true" aria-label="Search cards">
+            <input id="search-input" class="search-input" type="text" autocomplete="off"
+                   placeholder="Search by title, or type a card number…">
+            <ul id="search-results" class="search-results"></ul>
+            <p class="search-hint">↑↓ to move · Enter to open · Esc to close</p>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
     <script src="./index.js"></script>

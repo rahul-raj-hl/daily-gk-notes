@@ -2,90 +2,103 @@
     "use strict";
 
     var MARKDOWN_DIR = "markdowns";
-    var MAX_FILES = 500;
-    var PROBE_CHUNK = 12;
+    var MANIFEST_URL = MARKDOWN_DIR + "/manifest.json";
+    var MAX_RESULTS = 40;
+    var CACHE_LIMIT = 60;
 
     var contentEl = document.getElementById("content");
     var counterEl = document.getElementById("counter");
     var progressEl = document.getElementById("progress-bar");
     var prevBtn = document.getElementById("prev-btn");
     var nextBtn = document.getElementById("next-btn");
-    var jumpSelect = document.getElementById("jump-select");
     var themeToggle = document.getElementById("theme-toggle");
+    var searchBtn = document.getElementById("search-btn");
+    var overlayEl = document.getElementById("search-overlay");
+    var searchInput = document.getElementById("search-input");
+    var resultsEl = document.getElementById("search-results");
 
     var cards = [];
     var current = 0;
+    var renderToken = 0;
+    var results = [];
+    var activeResult = 0;
+
+    // Rendered markdown is kept in memory so revisiting a card is instant, but
+    // bounded so a long session over thousands of cards cannot grow without limit.
+    var cache = new Map();
 
     marked.setOptions({ gfm: true, breaks: false });
 
-    function fileUrl(id) {
-        return MARKDOWN_DIR + "/" + id + ".md";
+    function cacheGet(slug) {
+        if (!cache.has(slug)) return null;
+        var html = cache.get(slug);
+        cache.delete(slug);
+        cache.set(slug, html);
+        return html;
     }
 
-    function fetchCard(id) {
-        return fetch(fileUrl(id), { cache: "no-cache" })
+    function cacheSet(slug, html) {
+        cache.set(slug, html);
+        if (cache.size > CACHE_LIMIT) {
+            cache.delete(cache.keys().next().value);
+        }
+    }
+
+    function loadCard(index) {
+        var card = cards[index];
+        if (!card) return Promise.resolve(null);
+
+        var cached = cacheGet(card.slug);
+        if (cached !== null) return Promise.resolve(cached);
+
+        return fetch(MARKDOWN_DIR + "/" + card.slug + ".md")
             .then(function (res) {
-                if (!res.ok) return null;
+                if (!res.ok) throw new Error("HTTP " + res.status);
                 return res.text();
             })
-            .then(function (text) {
-                if (text === null) return null;
-                return { id: id, source: text, title: extractTitle(text, id) };
-            })
-            .catch(function () {
-                return null;
+            .then(function (source) {
+                var html = marked.parse(source);
+                cacheSet(card.slug, html);
+                return html;
             });
-    }
-
-    function extractTitle(source, id) {
-        var match = source.match(/^#\s+(.+)$/m);
-        return match ? match[1].trim() : id + ".md";
-    }
-
-    // Files are numbered (1.md, 2.md, ...). Probe in chunks and keep going as
-    // long as a chunk still yields hits, so small gaps in numbering are tolerated.
-    function discoverCards() {
-        var found = [];
-
-        function probeFrom(start) {
-            if (start > MAX_FILES) return Promise.resolve(found);
-
-            var ids = [];
-            for (var i = start; i < start + PROBE_CHUNK && i <= MAX_FILES; i++) {
-                ids.push(i);
-            }
-
-            return Promise.all(ids.map(fetchCard)).then(function (results) {
-                var hits = results.filter(Boolean);
-                if (hits.length === 0) return found;
-                found = found.concat(hits);
-                return probeFrom(start + PROBE_CHUNK);
-            });
-        }
-
-        return probeFrom(1).then(function (all) {
-            all.sort(function (a, b) {
-                return a.id - b.id;
-            });
-            return all;
-        });
     }
 
     function render() {
         var card = cards[current];
-        contentEl.innerHTML = marked.parse(card.source);
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        var token = ++renderToken;
 
         counterEl.textContent = current + 1 + " / " + cards.length;
         progressEl.style.width = ((current + 1) / cards.length) * 100 + "%";
         prevBtn.disabled = current === 0;
         nextBtn.disabled = current === cards.length - 1;
-        jumpSelect.value = String(current);
 
-        if (window.location.hash !== "#" + card.id) {
-            history.replaceState(null, "", "#" + card.id);
+        if (window.location.hash !== "#" + card.slug) {
+            history.replaceState(null, "", "#" + card.slug);
         }
         document.title = card.title + " · SSC GS";
+
+        loadCard(current)
+            .then(function (html) {
+                if (token !== renderToken) return;
+                contentEl.innerHTML = html;
+                window.scrollTo({ top: 0, behavior: "smooth" });
+                prefetchNeighbours();
+            })
+            .catch(function (err) {
+                if (token !== renderToken) return;
+                contentEl.innerHTML =
+                    '<p class="status status-error">Could not load <code>' +
+                    card.slug +
+                    ".md</code> — " +
+                    err.message +
+                    "</p>";
+            });
+    }
+
+    function prefetchNeighbours() {
+        [current + 1, current - 1].forEach(function (i) {
+            if (i >= 0 && i < cards.length) loadCard(i).catch(function () {});
+        });
     }
 
     function go(index) {
@@ -95,33 +108,85 @@
     }
 
     function indexFromHash() {
-        var id = parseInt(window.location.hash.replace("#", ""), 10);
-        if (isNaN(id)) return 0;
+        var slug = decodeURIComponent(window.location.hash.replace("#", ""));
+        if (!slug) return 0;
         for (var i = 0; i < cards.length; i++) {
-            if (cards[i].id === id) return i;
+            if (cards[i].slug === slug) return i;
         }
         return 0;
     }
 
-    function buildJumpList() {
-        jumpSelect.innerHTML = "";
-        cards.forEach(function (card, i) {
-            var option = document.createElement("option");
-            option.value = String(i);
-            option.textContent = i + 1 + ". " + card.title;
-            jumpSelect.appendChild(option);
+    /* ---------- Search ---------- */
+
+    function openSearch() {
+        overlayEl.hidden = false;
+        searchInput.value = "";
+        runSearch("");
+        searchInput.focus();
+    }
+
+    function closeSearch() {
+        overlayEl.hidden = true;
+        searchInput.blur();
+    }
+
+    function runSearch(query) {
+        var q = query.trim().toLowerCase();
+        var matches = [];
+
+        for (var i = 0; i < cards.length && matches.length < MAX_RESULTS; i++) {
+            if (q === "" || cards[i].title.toLowerCase().indexOf(q) !== -1 || cards[i].slug.indexOf(q) === 0) {
+                matches.push(i);
+            }
+        }
+
+        results = matches;
+        activeResult = 0;
+        paintResults();
+    }
+
+    function paintResults() {
+        resultsEl.innerHTML = "";
+
+        if (!results.length) {
+            var empty = document.createElement("li");
+            empty.className = "search-empty";
+            empty.textContent = "No matching cards";
+            resultsEl.appendChild(empty);
+            return;
+        }
+
+        results.forEach(function (cardIndex, i) {
+            var li = document.createElement("li");
+            li.className = "search-result" + (i === activeResult ? " is-active" : "");
+            li.innerHTML =
+                '<span class="search-num">' + (cardIndex + 1) + "</span>" + escapeHtml(cards[cardIndex].title);
+            li.addEventListener("click", function () {
+                closeSearch();
+                go(cardIndex);
+            });
+            resultsEl.appendChild(li);
         });
     }
 
-    function showEmptyState() {
-        var isFileProtocol = window.location.protocol === "file:";
-        contentEl.innerHTML = isFileProtocol
-            ? '<p class="status status-error">Opening this page directly from disk blocks reading the markdown files. ' +
-              "Serve the folder instead — run <code>python3 -m http.server 8000</code> here, " +
-              "then visit <code>http://localhost:8000</code>.</p>"
-            : '<p class="status status-error">No markdown files found in <code>' +
-              MARKDOWN_DIR +
-              "/</code>. Add <code>1.md</code>, <code>2.md</code>, and so on.</p>";
+    function escapeHtml(text) {
+        var div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function moveResult(delta) {
+        if (!results.length) return;
+        activeResult = (activeResult + delta + results.length) % results.length;
+        paintResults();
+        var active = resultsEl.querySelector(".is-active");
+        if (active) active.scrollIntoView({ block: "nearest" });
+    }
+
+    /* ---------- Setup ---------- */
+
+    function showError(message) {
+        contentEl.innerHTML = '<p class="status status-error">' + message + "</p>";
         counterEl.textContent = "0 / 0";
         prevBtn.disabled = true;
         nextBtn.disabled = true;
@@ -141,8 +206,31 @@
         go(current + 1);
     });
 
-    jumpSelect.addEventListener("change", function () {
-        go(parseInt(jumpSelect.value, 10));
+    searchBtn.addEventListener("click", openSearch);
+
+    overlayEl.addEventListener("click", function (event) {
+        if (event.target === overlayEl) closeSearch();
+    });
+
+    searchInput.addEventListener("input", function () {
+        runSearch(searchInput.value);
+    });
+
+    searchInput.addEventListener("keydown", function (event) {
+        if (event.key === "ArrowDown") {
+            event.preventDefault();
+            moveResult(1);
+        } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            moveResult(-1);
+        } else if (event.key === "Enter" && results.length) {
+            event.preventDefault();
+            var target = results[activeResult];
+            closeSearch();
+            go(target);
+        } else if (event.key === "Escape") {
+            closeSearch();
+        }
     });
 
     themeToggle.addEventListener("click", function () {
@@ -151,9 +239,22 @@
     });
 
     document.addEventListener("keydown", function (event) {
-        if (event.target.tagName === "SELECT" || event.metaKey || event.ctrlKey) return;
-        if (event.key === "ArrowRight" || event.key === "PageDown") go(current + 1);
-        if (event.key === "ArrowLeft" || event.key === "PageUp") go(current - 1);
+        if (!overlayEl.hidden) return;
+        if (event.metaKey || event.ctrlKey || event.altKey) return;
+        if (event.target.tagName === "INPUT") return;
+
+        if (event.key === "/") {
+            event.preventDefault();
+            openSearch();
+        } else if (event.key === "ArrowRight" || event.key === "PageDown") {
+            go(current + 1);
+        } else if (event.key === "ArrowLeft" || event.key === "PageUp") {
+            go(current - 1);
+        } else if (event.key === "Home") {
+            go(0);
+        } else if (event.key === "End") {
+            go(cards.length - 1);
+        }
     });
 
     window.addEventListener("hashchange", function () {
@@ -162,14 +263,33 @@
 
     applyTheme(localStorage.getItem("ssc-gs-theme") || "light");
 
-    discoverCards().then(function (all) {
-        cards = all;
-        if (!cards.length) {
-            showEmptyState();
-            return;
-        }
-        buildJumpList();
-        current = indexFromHash();
-        render();
-    });
+    fetch(MANIFEST_URL)
+        .then(function (res) {
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            return res.json();
+        })
+        .then(function (data) {
+            cards = data.cards || [];
+            if (!cards.length) {
+                showError("No cards listed in <code>" + MANIFEST_URL + "</code>.");
+                return;
+            }
+            current = indexFromHash();
+            render();
+        })
+        .catch(function () {
+            if (window.location.protocol === "file:") {
+                showError(
+                    "Opening this page directly from disk blocks reading the markdown files. " +
+                        "Serve the folder instead — run <code>python3 -m http.server 8000</code> here, " +
+                        "then visit <code>http://localhost:8000</code>."
+                );
+            } else {
+                showError(
+                    "Could not read <code>" +
+                        MANIFEST_URL +
+                        "</code>. Generate it by running <code>npm run build</code> in the project folder."
+                );
+            }
+        });
 })();

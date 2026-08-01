@@ -79,25 +79,32 @@ body {
     gap: 12px;
 }
 
-.jump {
+.search-trigger {
     display: flex;
     align-items: center;
     gap: 8px;
-}
-
-.jump-label {
-    font-size: 0.8rem;
-    color: var(--muted);
-}
-
-#jump-select {
-    max-width: 260px;
-    padding: 6px 10px;
+    padding: 7px 12px;
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface);
-    color: var(--text);
+    color: var(--muted);
     font-size: 0.85rem;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.search-trigger:hover {
+    background: var(--accent-soft);
+    color: var(--text);
+}
+
+.search-trigger kbd {
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--bg);
+    font-family: inherit;
+    font-size: 0.75rem;
 }
 
 .icon-btn {
@@ -330,12 +337,101 @@ body {
     font-size: 0.9rem;
 }
 
+/* ---------- Search overlay ---------- */
+
+.overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 12vh 20px 20px;
+    background: rgba(15, 18, 28, 0.45);
+    backdrop-filter: blur(2px);
+}
+
+.overlay[hidden] {
+    display: none;
+}
+
+.search-panel {
+    width: 100%;
+    max-width: 560px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+}
+
+.search-input {
+    width: 100%;
+    padding: 16px 20px;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 1rem;
+}
+
+.search-input:focus {
+    outline: none;
+}
+
+.search-results {
+    max-height: 46vh;
+    margin: 0;
+    padding: 6px;
+    list-style: none;
+    overflow-y: auto;
+}
+
+.search-result {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 9px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.92rem;
+}
+
+.search-result.is-active,
+.search-result:hover {
+    background: var(--accent-soft);
+}
+
+.search-num {
+    min-width: 42px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.8rem;
+}
+
+.search-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.search-hint {
+    margin: 0;
+    padding: 10px 16px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.75rem;
+    text-align: center;
+}
+
 @media (max-width: 640px) {
     .card {
         padding: 24px 20px;
     }
 
-    .jump {
+    .search-trigger kbd {
         display: none;
     }
 
