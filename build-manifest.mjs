@@ -52,6 +52,19 @@ function extractTitle(source, meta, fallback) {
     return match ? match[1].replace(/\s+/g, " ").trim() : fallback;
 }
 
+// Only the count is recorded. Shipping every question in the manifest would
+// not survive thousands of cards, so revision fetches the cards it picks.
+function countQuestions(source) {
+    const heading = source.match(/^#{2,3}[^\n]*Practice Questions[^\n]*$/im);
+    if (!heading) return 0;
+
+    return source
+        .slice(source.indexOf(heading[0]) + heading[0].length)
+        .split(/^#{3,4}\s+/m)
+        .slice(1)
+        .filter((block) => /^\s*-\s*\[[ xX]\]/m.test(block)).length;
+}
+
 async function collectMarkdown(dir, prefix = "") {
     const entries = await readdir(dir, { withFileTypes: true });
     const found = [];
@@ -101,6 +114,9 @@ const parsed = await Promise.all(
         const card = { slug: file.slug, title: extractTitle(source, meta, file.slug) };
         if (meta.subject) card.subject = meta.subject;
         if (meta.topic) card.topic = meta.topic;
+
+        const questions = countQuestions(source);
+        if (questions > 0) card.q = questions;
         return card;
     })
 );
@@ -111,9 +127,13 @@ const sets = [...new Set(cards.map((c) => (c.slug.includes("/") ? c.slug.split("
 
 await writeFile(OUTPUT, JSON.stringify({ sets, subjects, cards }) + "\n", "utf8");
 
+const quizCards = cards.filter((c) => c.q);
+const questionTotal = quizCards.reduce((sum, c) => sum + c.q, 0);
+
 console.log(
     `manifest.json written — ${cards.length} card(s)` +
         (sets.length ? `, ${sets.length} set(s): ${sets.join(", ")}` : "") +
         (subjects.length ? `, subjects: ${subjects.join(", ")}` : "")
 );
+console.log(`revision pool — ${questionTotal} question(s) across ${quizCards.length} card(s)`);
 if (skipped.length) console.log(`skipped ${skipped.length} empty file(s): ${skipped.join(", ")}`);

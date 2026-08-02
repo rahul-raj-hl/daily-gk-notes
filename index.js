@@ -6,6 +6,10 @@
     var MAX_RESULTS = 40;
     var CACHE_LIMIT = 60;
     var LAST_CARD_KEY = "ssc-gs-last-card";
+    var REVISION_KEY = "ssc-gs-revision-";
+    var REVISION_SIZE = 25;
+    var SCORE_CORRECT = 2;
+    var SCORE_WRONG = -0.5;
 
     var contentEl = document.getElementById("content");
     var counterEl = document.getElementById("counter");
@@ -14,6 +18,8 @@
     var nextBtn = document.getElementById("next-btn");
     var themeToggle = document.getElementById("theme-toggle");
     var searchBtn = document.getElementById("search-btn");
+    var revisionBtn = document.getElementById("revision-btn");
+    var pagerEl = document.querySelector(".pager");
     var overlayEl = document.getElementById("search-overlay");
     var searchInput = document.getElementById("search-input");
     var resultsEl = document.getElementById("search-results");
@@ -23,6 +29,8 @@
     var renderToken = 0;
     var results = [];
     var activeResult = 0;
+    var mode = "card";
+    var revision = null;
 
     // Parsed cards are kept in memory so revisiting one is instant, but bounded
     // so a long session over thousands of cards cannot grow without limit.
@@ -319,6 +327,7 @@
     }
 
     function go(index) {
+        if (mode === "revision") return;
         if (index < 0 || index >= cards.length || index === current) return;
         current = index;
         render();
@@ -461,6 +470,503 @@
         if (active) active.scrollIntoView({ block: "nearest" });
     }
 
+    /* ---------- Quick revision ---------- */
+
+    function todayKey() {
+        var now = new Date();
+        return (
+            now.getFullYear() +
+            "-" +
+            String(now.getMonth() + 1).padStart(2, "0") +
+            "-" +
+            String(now.getDate()).padStart(2, "0")
+        );
+    }
+
+    function hashString(text) {
+        var h = 2166136261;
+        for (var i = 0; i < text.length; i++) {
+            h ^= text.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+        return h >>> 0;
+    }
+
+    // Seeded so everyone opening the app on the same day gets the same paper,
+    // and reloading mid-attempt does not reshuffle the questions.
+    function seededRandom(seed) {
+        var a = seed;
+        return function () {
+            a = (a + 0x6d2b79f5) | 0;
+            var t = Math.imul(a ^ (a >>> 15), 1 | a);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+
+    function shuffle(list, rng) {
+        for (var i = list.length - 1; i > 0; i--) {
+            var j = Math.floor(rng() * (i + 1));
+            var tmp = list[i];
+            list[i] = list[j];
+            list[j] = tmp;
+        }
+        return list;
+    }
+
+    // Round-robin across subjects so a subject with many cards cannot crowd out
+    // the rest of the paper.
+    function pickDailyCards(rng) {
+        var pool = cards.filter(function (card) {
+            return card.q > 0;
+        });
+
+        var bySubject = {};
+        pool.forEach(function (card) {
+            var key = card.subject || "Other";
+            if (!bySubject[key]) bySubject[key] = [];
+            bySubject[key].push(card);
+        });
+
+        var subjects = shuffle(Object.keys(bySubject), rng);
+        subjects.forEach(function (key) {
+            shuffle(bySubject[key], rng);
+        });
+
+        var ordered = [];
+        for (var depth = 0; ordered.length < pool.length; depth++) {
+            var addedAny = false;
+            for (var s = 0; s < subjects.length; s++) {
+                var group = bySubject[subjects[s]];
+                if (group.length > depth) {
+                    ordered.push(group[depth]);
+                    addedAny = true;
+                }
+            }
+            if (!addedAny) break;
+        }
+
+        return ordered;
+    }
+
+    function buildDailyPaper() {
+        var dateKey = todayKey();
+        var rng = seededRandom(hashString(dateKey));
+        var ordered = pickDailyCards(rng);
+
+        if (!ordered.length) return Promise.resolve({ dateKey: dateKey, questions: [] });
+
+        // Only the cards that can contribute are fetched, never the whole set.
+        var needed = ordered.slice(0, REVISION_SIZE);
+        var extras = ordered.slice(REVISION_SIZE, REVISION_SIZE * 2);
+
+        return Promise.all(
+            needed.concat(extras).map(function (card) {
+                return loadBySlug(card.slug)
+                    .then(function (data) {
+                        return { card: card, questions: shuffle(data.questions.slice(), rng) };
+                    })
+                    .catch(function () {
+                        return null;
+                    });
+            })
+        ).then(function (loaded) {
+            var usable = loaded.filter(function (entry) {
+                return entry && entry.questions.length;
+            });
+
+            // First one question per card for maximum topic spread, then a
+            // second from each until the paper is full.
+            var paper = [];
+            for (var depth = 0; paper.length < REVISION_SIZE; depth++) {
+                var addedAny = false;
+                for (var i = 0; i < usable.length && paper.length < REVISION_SIZE; i++) {
+                    var entry = usable[i];
+                    if (entry.questions.length > depth) {
+                        paper.push({
+                            slug: entry.card.slug,
+                            title: entry.card.title,
+                            subject: entry.card.subject || "",
+                            question: entry.questions[depth]
+                        });
+                        addedAny = true;
+                    }
+                }
+                if (!addedAny) break;
+            }
+
+            return { dateKey: dateKey, questions: paper };
+        });
+    }
+
+    function loadBySlug(slug) {
+        var index = indexOfSlug(slug);
+        if (index === -1) return Promise.reject(new Error("unknown card"));
+        return loadCard(index);
+    }
+
+    function revisionSignature(paper) {
+        return paper.dateKey + ":" + paper.questions.length;
+    }
+
+    function readAttempt(paper) {
+        try {
+            var raw = localStorage.getItem(REVISION_KEY + paper.dateKey);
+            if (!raw) return null;
+            var saved = JSON.parse(raw);
+            if (saved.sig !== revisionSignature(paper)) return null;
+            return saved;
+        } catch (err) {
+            return null;
+        }
+    }
+
+    function saveAttempt() {
+        try {
+            localStorage.setItem(
+                REVISION_KEY + revision.dateKey,
+                JSON.stringify({ sig: revisionSignature(revision), answers: revision.answers, done: revision.done })
+            );
+        } catch (err) {
+            /* storage unavailable — the attempt just will not survive a reload */
+        }
+    }
+
+    function scoreOf(answers, questions) {
+        var correct = 0;
+        var wrong = 0;
+        var skipped = 0;
+
+        answers.forEach(function (answer, i) {
+            if (answer === null || answer === undefined) return;
+            if (answer === "skip") {
+                skipped++;
+            } else if (questions[i].question.options[answer] && questions[i].question.options[answer].correct) {
+                correct++;
+            } else {
+                wrong++;
+            }
+        });
+
+        return {
+            correct: correct,
+            wrong: wrong,
+            skipped: skipped,
+            answered: correct + wrong,
+            points: correct * SCORE_CORRECT + wrong * SCORE_WRONG
+        };
+    }
+
+    function formatPoints(value) {
+        return String(Math.round(value * 10) / 10);
+    }
+
+    function enterRevision() {
+        mode = "revision";
+        pagerEl.hidden = true;
+        progressEl.style.width = "0%";
+        counterEl.textContent = "";
+        document.title = "Quick Revision · SSC GS";
+        if (window.location.hash !== "#revision") history.replaceState(null, "", "#revision");
+
+        contentEl.innerHTML = '<p class="status">Building today\'s paper…</p>';
+
+        buildDailyPaper()
+            .then(function (paper) {
+                if (mode !== "revision") return;
+
+                if (!paper.questions.length) {
+                    contentEl.innerHTML =
+                        '<p class="status">No practice questions found yet. Add a ' +
+                        "<code>Practice Questions</code> section to a card and rebuild.</p>" +
+                        '<p class="status"><button class="nav-btn" id="rev-exit">Back to cards</button></p>';
+                    document.getElementById("rev-exit").addEventListener("click", exitRevision);
+                    return;
+                }
+
+                var saved = readAttempt(paper);
+                revision = {
+                    dateKey: paper.dateKey,
+                    questions: paper.questions,
+                    answers: saved ? saved.answers : paper.questions.map(function () {
+                        return null;
+                    }),
+                    done: saved ? saved.done : false
+                };
+
+                revision.index = revision.answers.findIndex(function (a) {
+                    return a === null || a === undefined;
+                });
+                if (revision.index === -1) revision.index = revision.questions.length - 1;
+
+                if (revision.done) renderResults();
+                else renderRevisionQuestion();
+            })
+            .catch(function (err) {
+                contentEl.innerHTML = '<p class="status status-error">Could not build the paper — ' + err.message + "</p>";
+            });
+    }
+
+    function exitRevision() {
+        mode = "card";
+        pagerEl.hidden = false;
+        revision = null;
+        if (window.location.hash === "#revision") history.replaceState(null, "", "#" + cards[current].slug);
+        render();
+    }
+
+    function renderRevisionQuestion() {
+        var item = revision.questions[revision.index];
+        var question = item.question;
+        var total = revision.questions.length;
+        var tally = scoreOf(revision.answers, revision.questions);
+        var chosen = revision.answers[revision.index];
+
+        progressEl.style.width = ((revision.index + 1) / total) * 100 + "%";
+
+        contentEl.innerHTML = "";
+
+        var head = document.createElement("div");
+        head.className = "rev-head";
+        head.innerHTML =
+            '<div><h2 class="rev-title">⚡ Quick Revision</h2>' +
+            '<p class="rev-date">' +
+            revision.dateKey +
+            " · +" +
+            SCORE_CORRECT +
+            " correct, " +
+            SCORE_WRONG +
+            " wrong</p></div>" +
+            '<div class="rev-stats"><span class="rev-count">' +
+            (revision.index + 1) +
+            " / " +
+            total +
+            '</span><span class="rev-points">' +
+            formatPoints(tally.points) +
+            " pts</span></div>";
+        contentEl.appendChild(head);
+
+        var block = document.createElement("div");
+        block.className = "rev-question";
+
+        var meta = document.createElement("div");
+        meta.className = "rev-meta";
+        meta.innerHTML =
+            (item.subject ? '<span class="chip chip-subject">' + escapeHtml(item.subject) + "</span>" : "") +
+            '<span class="rev-source">' +
+            escapeHtml(item.title) +
+            "</span>";
+        block.appendChild(meta);
+
+        var prompt = document.createElement("p");
+        prompt.className = "rev-prompt";
+        prompt.innerHTML = inline(question.prompt);
+        block.appendChild(prompt);
+
+        var list = document.createElement("div");
+        list.className = "quiz-options";
+
+        var explanation = document.createElement("div");
+        explanation.className = "quiz-explanation";
+        explanation.hidden = true;
+        if (question.explanation) explanation.innerHTML = marked.parse(question.explanation);
+
+        var footer = document.createElement("div");
+        footer.className = "rev-actions";
+
+        question.options.forEach(function (option, optionIndex) {
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "quiz-option";
+            btn.innerHTML = inline(option.text);
+            btn.addEventListener("click", function () {
+                if (revision.answers[revision.index] !== null) return;
+                revision.answers[revision.index] = optionIndex;
+                saveAttempt();
+                renderRevisionQuestion();
+            });
+            list.appendChild(btn);
+        });
+
+        block.appendChild(list);
+        block.appendChild(explanation);
+
+        var answered = chosen !== null && chosen !== undefined;
+        if (answered) {
+            Array.prototype.forEach.call(list.children, function (child, i) {
+                child.disabled = true;
+                if (question.options[i].correct) child.classList.add("is-correct");
+            });
+            if (chosen !== "skip" && !question.options[chosen].correct) {
+                list.children[chosen].classList.add("is-wrong");
+            }
+            if (chosen === "skip") block.classList.add("is-skipped");
+            if (question.explanation) explanation.hidden = false;
+        }
+
+        if (!answered) {
+            var skip = document.createElement("button");
+            skip.type = "button";
+            skip.className = "nav-btn";
+            skip.textContent = "Skip";
+            skip.addEventListener("click", function () {
+                revision.answers[revision.index] = "skip";
+                saveAttempt();
+                renderRevisionQuestion();
+            });
+            footer.appendChild(skip);
+        } else {
+            var next = document.createElement("button");
+            next.type = "button";
+            next.className = "nav-btn nav-btn-primary";
+            var isLast = revision.index === total - 1;
+            next.textContent = isLast ? "See results" : "Next question →";
+            next.addEventListener("click", function () {
+                if (isLast) {
+                    revision.done = true;
+                    saveAttempt();
+                    renderResults();
+                } else {
+                    revision.index++;
+                    renderRevisionQuestion();
+                }
+            });
+            footer.appendChild(next);
+        }
+
+        var quit = document.createElement("button");
+        quit.type = "button";
+        quit.className = "nav-btn rev-quit";
+        quit.textContent = "Exit";
+        quit.addEventListener("click", exitRevision);
+        footer.appendChild(quit);
+
+        block.appendChild(footer);
+        contentEl.appendChild(block);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function renderResults() {
+        var total = revision.questions.length;
+        var tally = scoreOf(revision.answers, revision.questions);
+        var max = total * SCORE_CORRECT;
+
+        progressEl.style.width = "100%";
+        contentEl.innerHTML = "";
+
+        var head = document.createElement("div");
+        head.className = "rev-result-head";
+        head.innerHTML =
+            '<p class="rev-date">Quick Revision · ' +
+            revision.dateKey +
+            '</p><p class="rev-final">' +
+            formatPoints(tally.points) +
+            ' <span class="rev-final-max">/ ' +
+            max +
+            "</span></p>";
+        contentEl.appendChild(head);
+
+        var stats = document.createElement("div");
+        stats.className = "rev-summary";
+        [
+            { label: "Correct", value: tally.correct, cls: "is-correct" },
+            { label: "Wrong", value: tally.wrong, cls: "is-wrong" },
+            { label: "Skipped", value: tally.skipped, cls: "" },
+            {
+                label: "Accuracy",
+                value: tally.answered ? Math.round((tally.correct / tally.answered) * 100) + "%" : "—",
+                cls: ""
+            }
+        ].forEach(function (stat) {
+            var box = document.createElement("div");
+            box.className = "rev-stat " + stat.cls;
+            box.innerHTML = '<span class="rev-stat-value">' + stat.value + '</span><span class="rev-stat-label">' + stat.label + "</span>";
+            stats.appendChild(box);
+        });
+        contentEl.appendChild(stats);
+
+        var review = document.createElement("ol");
+        review.className = "rev-review";
+
+        revision.questions.forEach(function (item, i) {
+            var answer = revision.answers[i];
+            var correctOption = item.question.options.find(function (o) {
+                return o.correct;
+            });
+            var state = answer === "skip" || answer === null ? "skipped" : item.question.options[answer].correct ? "correct" : "wrong";
+
+            var li = document.createElement("li");
+            li.className = "rev-review-item is-" + state;
+
+            var prompt = document.createElement("p");
+            prompt.className = "rev-review-prompt";
+            prompt.innerHTML = inline(item.question.prompt);
+            li.appendChild(prompt);
+
+            var detail = document.createElement("p");
+            detail.className = "rev-review-detail";
+            if (state === "wrong") {
+                detail.innerHTML =
+                    '<span class="rev-yours">You: ' +
+                    inline(item.question.options[answer].text) +
+                    '</span><span class="rev-right">Answer: ' +
+                    inline(correctOption ? correctOption.text : "—") +
+                    "</span>";
+            } else if (state === "skipped") {
+                detail.innerHTML = '<span class="rev-right">Answer: ' + inline(correctOption ? correctOption.text : "—") + "</span>";
+            } else {
+                detail.innerHTML = '<span class="rev-right">Answer: ' + inline(correctOption.text) + "</span>";
+            }
+            li.appendChild(detail);
+
+            var link = document.createElement("button");
+            link.type = "button";
+            link.className = "rev-jump";
+            link.textContent = "Open " + item.title;
+            link.addEventListener("click", function () {
+                var target = indexOfSlug(item.slug);
+                mode = "card";
+                pagerEl.hidden = false;
+                revision = null;
+                current = target === -1 ? current : target;
+                render();
+            });
+            li.appendChild(link);
+
+            review.appendChild(li);
+        });
+
+        contentEl.appendChild(review);
+
+        var actions = document.createElement("div");
+        actions.className = "rev-actions";
+
+        var retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "nav-btn";
+        retry.textContent = "Retry today's paper";
+        retry.addEventListener("click", function () {
+            revision.answers = revision.questions.map(function () {
+                return null;
+            });
+            revision.index = 0;
+            revision.done = false;
+            saveAttempt();
+            renderRevisionQuestion();
+        });
+        actions.appendChild(retry);
+
+        var back = document.createElement("button");
+        back.type = "button";
+        back.className = "nav-btn nav-btn-primary";
+        back.textContent = "Back to cards";
+        back.addEventListener("click", exitRevision);
+        actions.appendChild(back);
+
+        contentEl.appendChild(actions);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
     /* ---------- Setup ---------- */
 
     function showError(message) {
@@ -485,6 +991,11 @@
     });
 
     searchBtn.addEventListener("click", openSearch);
+
+    revisionBtn.addEventListener("click", function () {
+        if (mode === "revision") exitRevision();
+        else enterRevision();
+    });
 
     overlayEl.addEventListener("click", function (event) {
         if (event.target === overlayEl) closeSearch();
@@ -524,7 +1035,16 @@
         if (event.key === "/") {
             event.preventDefault();
             openSearch();
-        } else if (event.key === "ArrowRight" || event.key === "PageDown") {
+            return;
+        }
+
+        // Card paging would fight the revision flow, so it is suspended there.
+        if (mode === "revision") {
+            if (event.key === "Escape") exitRevision();
+            return;
+        }
+
+        if (event.key === "ArrowRight" || event.key === "PageDown") {
             go(current + 1);
         } else if (event.key === "ArrowLeft" || event.key === "PageUp") {
             go(current - 1);
@@ -536,7 +1056,13 @@
     });
 
     window.addEventListener("hashchange", function () {
-        if (cards.length) go(indexFromHash());
+        if (!cards.length) return;
+        if (window.location.hash === "#revision") {
+            if (mode !== "revision") enterRevision();
+            return;
+        }
+        if (mode === "revision") exitRevision();
+        else go(indexFromHash());
     });
 
     applyTheme(localStorage.getItem("ssc-gs-theme") || "light");
@@ -555,7 +1081,8 @@
                 return;
             }
             current = startingIndex();
-            render();
+            if (window.location.hash === "#revision") enterRevision();
+            else render();
         })
         .catch(function () {
             if (window.location.protocol === "file:") {

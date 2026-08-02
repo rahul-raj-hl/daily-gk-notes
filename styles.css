@@ -517,6 +517,232 @@ body {
     margin-bottom: 0;
 }
 
+/* ---------- Quick revision ---------- */
+
+.revision-trigger {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 14px;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.revision-trigger:hover {
+    filter: brightness(1.08);
+}
+
+.rev-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+}
+
+.rev-title {
+    margin: 0;
+    font-size: 1.25rem;
+}
+
+.rev-date {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
+.rev-stats {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+}
+
+.rev-count {
+    color: var(--muted);
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.rev-points {
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.rev-question {
+    margin-top: 24px;
+}
+
+.rev-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.rev-source {
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
+.rev-prompt {
+    margin: 0 0 18px;
+    font-size: 1.05rem;
+    font-weight: 500;
+    line-height: 1.55;
+}
+
+.rev-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 22px;
+}
+
+.rev-quit {
+    min-width: 0;
+    padding: 10px 16px;
+    color: var(--muted);
+}
+
+.rev-question.is-skipped .rev-prompt {
+    opacity: 0.75;
+}
+
+/* ---------- Revision results ---------- */
+
+.rev-result-head {
+    text-align: center;
+    padding-bottom: 8px;
+}
+
+.rev-final {
+    margin: 6px 0 0;
+    font-size: 3rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+.rev-final-max {
+    color: var(--muted);
+    font-size: 1.2rem;
+    font-weight: 500;
+}
+
+.rev-summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin: 24px 0 30px;
+}
+
+.rev-stat {
+    padding: 14px 8px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    text-align: center;
+    background: var(--bg);
+}
+
+.rev-stat.is-correct {
+    border-color: var(--memory-border);
+    background: var(--memory-bg);
+}
+
+.rev-stat.is-wrong {
+    border-color: #d1495b;
+    background: var(--warning-bg);
+}
+
+.rev-stat-value {
+    display: block;
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.rev-stat-label {
+    display: block;
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 0.75rem;
+}
+
+.rev-review {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.rev-review-item {
+    margin-bottom: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--border);
+    border-radius: 10px;
+}
+
+.rev-review-item.is-correct {
+    border-left-color: var(--memory-border);
+}
+
+.rev-review-item.is-wrong {
+    border-left-color: #d1495b;
+}
+
+.rev-review-item.is-skipped {
+    border-left-color: var(--muted);
+}
+
+.rev-review-prompt {
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+
+.rev-review-detail {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+.rev-yours {
+    color: #d1495b;
+}
+
+.rev-right {
+    color: var(--memory-border);
+}
+
+.rev-jump {
+    margin-top: 10px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
 /* ---------- Search overlay ---------- */
 
 .overlay {
@@ -629,6 +855,14 @@ body {
 
     .search-trigger kbd {
         display: none;
+    }
+
+    .rev-summary {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .rev-actions {
+        flex-direction: column-reverse;
     }
 
     .nav-btn {
