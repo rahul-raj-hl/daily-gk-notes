@@ -42,6 +42,12 @@
         return marked.parseInline(text);
     }
 
+    function escapeHtml(text) {
+        var div = document.createElement("div");
+        div.textContent = text == null ? "" : text;
+        return div.innerHTML;
+    }
+
     /* ---------- Parsing ---------- */
 
     // Handles the flat `key: value` and `- item` list shapes used in card
