@@ -378,7 +378,22 @@
     }
 
     function haystack(card) {
-        return (card.title + " " + (card.subject || "") + " " + (card.topic || "")).toLowerCase();
+        return (
+            card.title +
+            " " +
+            (card.subject || "") +
+            " " +
+            (card.topic || "") +
+            " " +
+            card.slug
+        ).toLowerCase();
+    }
+
+    // Slugs are set-qualified ("test-5/3"), so a bare number has to be matched
+    // against the file name for "type a card number" to keep working.
+    function cardNumber(slug) {
+        var at = slug.lastIndexOf("/");
+        return at === -1 ? slug : slug.slice(at + 1);
     }
 
     function runSearch(query) {
@@ -386,7 +401,7 @@
         var matches = [];
 
         for (var i = 0; i < cards.length && matches.length < MAX_RESULTS; i++) {
-            if (q === "" || haystack(cards[i]).indexOf(q) !== -1 || cards[i].slug.indexOf(q) === 0) {
+            if (q === "" || haystack(cards[i]).indexOf(q) !== -1 || cardNumber(cards[i].slug).indexOf(q) === 0) {
                 matches.push(i);
             }
         }
