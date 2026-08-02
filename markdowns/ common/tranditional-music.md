@@ -229,4 +229,43 @@ Which dance form is famous for elaborate face makeup and dance-drama?
 
 > **Explanation:** Kathakali of Kerala is renowned for its elaborate costumes, makeup, and dramatic storytelling.
 
+## 📚 Previous Year Questions (SSC)
+
+### SSC CGL 2024
+
+Q. Which classical dance form is associated with Odisha?
+
+- [ ] Bharatanatyam
+- [ ] Kathak
+- [x] Odissi
+- [ ] Kuchipudi
+
+> Asked in SSC CGL 2024 (Shift 2)
+
 ---
+
+### SSC CHSL 2023
+
+Q. Which classical dance is famous for the Tarangam performance on a brass plate?
+
+- [ ] Kathak
+- [x] Kuchipudi
+- [ ] Kathakali
+- [ ] Manipuri
+
+> Asked in SSC CHSL 2023
+
+---
+
+### SSC CGL 2022
+
+Q. Sattriya dance originated in which state?
+
+- [ ] Odisha
+- [ ] Kerala
+- [x] Assam
+- [ ] Manipur
+
+> Asked in SSC CGL 2022
+---
+
