@@ -5,7 +5,7 @@
   "description": "Flashcard-style reader for SSC General Studies markdown notes",
   "scripts": {
     "build": "node build-manifest.mjs",
-    "start": "npm run build && python3 -m http.server 8000",
+    "start": "npm run build && npx serve -p 8000 .",
     "deploy": "npm run build && git add -A && (git diff --cached --quiet || git commit -m \"Add cards $(date +%F)\") && git push"
   }
 }
