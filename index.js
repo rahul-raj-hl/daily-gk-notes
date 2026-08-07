@@ -43,7 +43,7 @@
     function getCardSet(card) {
         if (!card || !card.slug) return "";
         var at = card.slug.indexOf("/");
-        return at === -1 ? "" : card.slug.slice(0, at);
+        return at === -1 ? "" : card.slug.slice(0, at).trim();
     }
 
     function getFilteredIndices() {
@@ -63,7 +63,13 @@
         var counts = {};
         cards.forEach(function (card) {
             var s = getCardSet(card);
-            if (s) counts[s] = (counts[s] || 0) + 1;
+            if (s) {
+                counts[s] = (counts[s] || 0) + 1;
+            }
+        });
+
+        var folderList = Object.keys(counts).sort(function (a, b) {
+            return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
         });
 
         var allOpt = document.createElement("option");
@@ -71,17 +77,15 @@
         allOpt.textContent = "📁 All Folders (" + cards.length + ")";
         folderFilterEl.appendChild(allOpt);
 
-        var availableSets = sets && sets.length ? sets.slice() : Object.keys(counts).sort();
-        availableSets.forEach(function (set) {
+        folderList.forEach(function (setKey) {
             var opt = document.createElement("option");
-            opt.value = set;
-            var label = set.trim();
-            opt.textContent = "📂 " + label + " (" + (counts[set] || 0) + ")";
+            opt.value = setKey;
+            opt.textContent = "📂 " + setKey + " (" + counts[setKey] + ")";
             folderFilterEl.appendChild(opt);
         });
 
         var savedFolder = readSavedFolder();
-        if (savedFolder && (savedFolder === "all" || availableSets.indexOf(savedFolder) !== -1)) {
+        if (savedFolder && savedFolder !== "all" && folderList.indexOf(savedFolder) !== -1) {
             activeFolder = savedFolder;
             folderFilterEl.value = activeFolder;
         } else {

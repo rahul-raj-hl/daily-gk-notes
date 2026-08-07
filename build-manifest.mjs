@@ -123,7 +123,7 @@ const parsed = await Promise.all(
 
 const cards = parsed.filter(Boolean).sort(compareCards);
 const subjects = [...new Set(cards.map((c) => c.subject).filter(Boolean))].sort();
-const sets = [...new Set(cards.map((c) => (c.slug.includes("/") ? c.slug.split("/")[0] : "")).filter(Boolean))].sort();
+const sets = [...new Set(cards.map((c) => (c.slug.includes("/") ? c.slug.split("/")[0].trim() : "")).filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
 
 await writeFile(OUTPUT, JSON.stringify({ sets, subjects, cards }) + "\n", "utf8");
 
