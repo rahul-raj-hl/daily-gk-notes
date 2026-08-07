@@ -14,11 +14,16 @@
         </div>
 
         <div class="topbar-actions">
+            <div class="folder-filter-wrapper">
+                <select id="folder-filter" class="folder-select" aria-label="Filter by test folder">
+                    <option value="all">📁 All Folders</option>
+                </select>
+            </div>
             <button id="revision-btn" class="revision-trigger" type="button">
-                <span aria-hidden="true">⚡</span> Quick Revision
+                <span aria-hidden="true">⚡</span> <span class="btn-text">Quick Revision</span>
             </button>
             <button id="search-btn" class="search-trigger" type="button">
-                <span aria-hidden="true">🔍</span> Search <kbd>/</kbd>
+                <span aria-hidden="true">🔍</span> <span class="btn-text">Search</span> <kbd>/</kbd>
             </button>
             <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle dark mode">🌙</button>
         </div>

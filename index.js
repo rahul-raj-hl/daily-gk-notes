@@ -32,9 +32,77 @@
     var mode = "card";
     var revision = null;
 
+    var folderFilterEl = document.getElementById("folder-filter");
+    var FOLDER_KEY = "ssc-gs-active-folder";
+    var activeFolder = "all";
+
     // Parsed cards are kept in memory so revisiting one is instant, but bounded
     // so a long session over thousands of cards cannot grow without limit.
     var cache = new Map();
+
+    function getCardSet(card) {
+        if (!card || !card.slug) return "";
+        var at = card.slug.indexOf("/");
+        return at === -1 ? "" : card.slug.slice(0, at);
+    }
+
+    function getFilteredIndices() {
+        var indices = [];
+        for (var i = 0; i < cards.length; i++) {
+            if (activeFolder === "all" || getCardSet(cards[i]) === activeFolder) {
+                indices.push(i);
+            }
+        }
+        return indices;
+    }
+
+    function populateFolderFilter(sets) {
+        if (!folderFilterEl) return;
+        folderFilterEl.innerHTML = "";
+
+        var counts = {};
+        cards.forEach(function (card) {
+            var s = getCardSet(card);
+            if (s) counts[s] = (counts[s] || 0) + 1;
+        });
+
+        var allOpt = document.createElement("option");
+        allOpt.value = "all";
+        allOpt.textContent = "📁 All Folders (" + cards.length + ")";
+        folderFilterEl.appendChild(allOpt);
+
+        var availableSets = sets && sets.length ? sets.slice() : Object.keys(counts).sort();
+        availableSets.forEach(function (set) {
+            var opt = document.createElement("option");
+            opt.value = set;
+            var label = set.trim();
+            opt.textContent = "📂 " + label + " (" + (counts[set] || 0) + ")";
+            folderFilterEl.appendChild(opt);
+        });
+
+        var savedFolder = readSavedFolder();
+        if (savedFolder && (savedFolder === "all" || availableSets.indexOf(savedFolder) !== -1)) {
+            activeFolder = savedFolder;
+            folderFilterEl.value = activeFolder;
+        } else {
+            activeFolder = "all";
+            folderFilterEl.value = "all";
+        }
+    }
+
+    function readSavedFolder() {
+        try {
+            return localStorage.getItem(FOLDER_KEY) || "all";
+        } catch (err) {
+            return "all";
+        }
+    }
+
+    function rememberFolder(folder) {
+        try {
+            localStorage.setItem(FOLDER_KEY, folder);
+        } catch (err) {}
+    }
 
     marked.setOptions({ gfm: true, breaks: false });
 
@@ -282,13 +350,30 @@
     }
 
     function render() {
+        var visibleIndices = getFilteredIndices();
+        if (visibleIndices.length === 0) {
+            contentEl.innerHTML = '<p class="status">No cards found in this test folder.</p>';
+            counterEl.textContent = "0 / 0";
+            progressEl.style.width = "0%";
+            prevBtn.disabled = true;
+            nextBtn.disabled = true;
+            return;
+        }
+
+        var pos = visibleIndices.indexOf(current);
+        if (pos === -1) {
+            current = visibleIndices[0];
+            pos = 0;
+        }
+
         var card = cards[current];
         var token = ++renderToken;
 
-        counterEl.textContent = current + 1 + " / " + cards.length;
-        progressEl.style.width = ((current + 1) / cards.length) * 100 + "%";
-        prevBtn.disabled = current === 0;
-        nextBtn.disabled = current === cards.length - 1;
+        var totalVisible = visibleIndices.length;
+        counterEl.textContent = pos + 1 + " / " + totalVisible;
+        progressEl.style.width = ((pos + 1) / totalVisible) * 100 + "%";
+        prevBtn.disabled = pos === 0;
+        nextBtn.disabled = pos === totalVisible - 1;
 
         if (window.location.hash !== "#" + card.slug) {
             history.replaceState(null, "", "#" + card.slug);
@@ -327,8 +412,14 @@
     }
 
     function prefetchNeighbours() {
-        [current + 1, current - 1].forEach(function (i) {
-            if (i >= 0 && i < cards.length) loadCard(i).catch(function () {});
+        var visibleIndices = getFilteredIndices();
+        var pos = visibleIndices.indexOf(current);
+        if (pos === -1) return;
+
+        [pos + 1, pos - 1].forEach(function (p) {
+            if (p >= 0 && p < visibleIndices.length) {
+                loadCard(visibleIndices[p]).catch(function () {});
+            }
         });
     }
 
@@ -336,6 +427,14 @@
         if (mode === "revision") return;
         if (index < 0 || index >= cards.length || index === current) return;
         current = index;
+
+        var cardSet = getCardSet(cards[current]);
+        if (activeFolder !== "all" && cardSet !== activeFolder) {
+            activeFolder = cardSet || "all";
+            rememberFolder(activeFolder);
+            if (folderFilterEl) folderFilterEl.value = activeFolder;
+        }
+
         render();
     }
 
@@ -416,6 +515,7 @@
         var matches = [];
 
         for (var i = 0; i < cards.length && matches.length < MAX_RESULTS; i++) {
+            if (activeFolder !== "all" && getCardSet(cards[i]) !== activeFolder) continue;
             if (q === "" || haystack(cards[i]).indexOf(q) !== -1 || cardNumber(cards[i].slug).indexOf(q) === 0) {
                 matches.push(i);
             }
@@ -432,7 +532,7 @@
         if (!results.length) {
             var empty = document.createElement("li");
             empty.className = "search-empty";
-            empty.textContent = "No matching cards";
+            empty.textContent = activeFolder !== "all" ? "No matching cards in folder '" + activeFolder.trim() + "'" : "No matching cards";
             resultsEl.appendChild(empty);
             return;
         }
@@ -458,6 +558,14 @@
                 subject.className = "search-subject";
                 subject.textContent = card.subject;
                 li.appendChild(subject);
+            }
+
+            var cardSet = getCardSet(card);
+            if (cardSet) {
+                var setBadge = document.createElement("span");
+                setBadge.className = "search-set";
+                setBadge.textContent = cardSet.trim();
+                li.appendChild(setBadge);
             }
 
             li.addEventListener("click", function () {
@@ -989,12 +1097,34 @@
     }
 
     prevBtn.addEventListener("click", function () {
-        go(current - 1);
+        var visible = getFilteredIndices();
+        var pos = visible.indexOf(current);
+        if (pos > 0) {
+            go(visible[pos - 1]);
+        }
     });
 
     nextBtn.addEventListener("click", function () {
-        go(current + 1);
+        var visible = getFilteredIndices();
+        var pos = visible.indexOf(current);
+        if (pos >= 0 && pos < visible.length - 1) {
+            go(visible[pos + 1]);
+        }
     });
+
+    if (folderFilterEl) {
+        folderFilterEl.addEventListener("change", function () {
+            activeFolder = folderFilterEl.value;
+            rememberFolder(activeFolder);
+            var visible = getFilteredIndices();
+            if (visible.length > 0) {
+                if (visible.indexOf(current) === -1) {
+                    current = visible[0];
+                }
+                render();
+            }
+        });
+    }
 
     searchBtn.addEventListener("click", openSearch);
 
@@ -1036,7 +1166,7 @@
     document.addEventListener("keydown", function (event) {
         if (!overlayEl.hidden) return;
         if (event.metaKey || event.ctrlKey || event.altKey) return;
-        if (event.target.tagName === "INPUT" || event.target.tagName === "BUTTON") return;
+        if (event.target.tagName === "INPUT" || event.target.tagName === "BUTTON" || event.target.tagName === "SELECT") return;
 
         if (event.key === "/") {
             event.preventDefault();
@@ -1050,14 +1180,17 @@
             return;
         }
 
+        var visible = getFilteredIndices();
+        var pos = visible.indexOf(current);
+
         if (event.key === "ArrowRight" || event.key === "PageDown") {
-            go(current + 1);
+            if (pos >= 0 && pos < visible.length - 1) go(visible[pos + 1]);
         } else if (event.key === "ArrowLeft" || event.key === "PageUp") {
-            go(current - 1);
+            if (pos > 0) go(visible[pos - 1]);
         } else if (event.key === "Home") {
-            go(0);
+            if (visible.length) go(visible[0]);
         } else if (event.key === "End") {
-            go(cards.length - 1);
+            if (visible.length) go(visible[visible.length - 1]);
         }
     });
 
@@ -1086,7 +1219,22 @@
                 showError("No cards listed in <code>" + MANIFEST_URL + "</code>.");
                 return;
             }
+            populateFolderFilter(data.sets);
             current = startingIndex();
+
+            var startingSet = getCardSet(cards[current]);
+            var savedFolder = readSavedFolder();
+            if (window.location.hash && startingSet) {
+                activeFolder = startingSet;
+                rememberFolder(activeFolder);
+                if (folderFilterEl) folderFilterEl.value = activeFolder;
+            } else if (savedFolder && savedFolder !== "all") {
+                var visible = getFilteredIndices();
+                if (visible.indexOf(current) === -1 && visible.length > 0) {
+                    current = visible[0];
+                }
+            }
+
             if (window.location.hash === "#revision") enterRevision();
             else render();
         })
